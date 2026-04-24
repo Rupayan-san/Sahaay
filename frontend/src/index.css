@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    min-height: 100%;
+  }
+
+  body {
+    @apply font-body text-on-surface bg-surface antialiased;
+    margin: 0;
+    min-height: 100vh;
+  }
+
+  .dark body,
+  .dark {
+    @apply bg-gray-950 text-gray-100;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white dark:bg-gray-900 rounded-2xl border border-outline-variant dark:border-gray-800 shadow-sm;
+  }
+
+  .btn-primary {
+    @apply bg-primary text-white px-4 py-2 rounded-xl font-semibold text-sm
+           hover:bg-primary-container transition-colors duration-200
+           focus:outline-none focus:ring-2 focus:ring-secondary focus:ring-offset-2;
+  }
+
+  .btn-secondary {
+    @apply bg-secondary text-white px-4 py-2 rounded-xl font-semibold text-sm
+           hover:bg-secondary-container hover:text-primary transition-colors duration-200
+           focus:outline-none focus:ring-2 focus:ring-secondary focus:ring-offset-2;
+  }
+
+  .btn-outline {
+    @apply border border-outline text-on-surface-variant px-4 py-2 rounded-xl font-semibold text-sm
+           hover:bg-surface-container transition-colors duration-200
+           dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-2.5 rounded-xl border border-outline-variant bg-white
+           text-on-surface placeholder:text-outline text-sm
+           focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent
+           dark:bg-gray-900 dark:border-gray-700 dark:text-gray-100 dark:placeholder:text-gray-500
+           transition-all duration-200;
+  }
+
+  .label-caps {
+    @apply text-xs uppercase font-semibold tracking-widest;
+  }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-outline-variant rounded-full;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  @apply bg-gray-700;
+}
+
+.fade-reveal {
+  animation: fadeReveal 480ms ease-out both;
+}
+
+@keyframes fadeReveal {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
