@@ -51,9 +51,7 @@ export async function ingestAndCreateIssue(payload: {
     const formData = new FormData();
     formData.append('file', payload.file);
 
-    const response = await apiClient.post<IngestResponse>('/api/ingest', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    const response = await apiClient.post<IngestResponse>('/api/ingest', formData);
     ingestResult = response.data;
   }
 

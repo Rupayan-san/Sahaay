@@ -46,6 +46,48 @@ async def test_image_ingestion_no_file_returns_error(client: AsyncClient) -> Non
 
 
 @pytest.mark.asyncio
+async def test_image_ingestion_accepts_multipart_upload(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_extract_text_and_metadata(_: object) -> tuple[str, dict[str, str]]:
+        return "Broken road near Village A", {"source": "test-image"}
+
+    monkeypatch.setattr("app.api.routes.ingestion.extract_text_and_metadata", fake_extract_text_and_metadata)
+
+    response = await client.post(
+        "/api/ingest",
+        files={"file": ("report.png", b"fake-image-bytes", "image/png")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["content"] == "Broken road near Village A"
+    assert payload["data"]["source_type"] == "image"
+
+
+@pytest.mark.asyncio
+async def test_image_ingestion_falls_back_when_ocr_fails(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.utils.ocr import OCRProcessingError
+
+    def fake_extract_text_and_metadata(_: object) -> tuple[str, dict[str, str]]:
+        raise OCRProcessingError("Image OCR processing failed")
+
+    monkeypatch.setattr("app.api.routes.ingestion.extract_text_and_metadata", fake_extract_text_and_metadata)
+
+    response = await client.post(
+        "/api/ingest",
+        files={"file": ("field-photo.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "Image report uploaded for review" in payload["data"]["content"]
+    assert payload["data"]["source_type"] == "image"
+    assert payload["data"]["metadata"]["ocr_status"] == "failed"
+
+
+@pytest.mark.asyncio
 async def test_ingest_creates_issue_when_forwarded_to_issue_endpoint(
     client: AsyncClient,
     service_mocks: dict[str, object],

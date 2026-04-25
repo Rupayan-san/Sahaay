@@ -5,8 +5,9 @@ import os
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import ValidationError
+from starlette.datastructures import UploadFile
 
 from app.models.ingestion import FormIngestionRequest, IngestionData, IngestionResponse, SourceType
 from app.utils.ocr import OCRProcessingError, extract_text_and_metadata
@@ -33,6 +34,12 @@ async def ingest(request: Request) -> IngestionResponse:
 
     if "multipart/form-data" in content_type:
         return await _handle_multipart_payload(request)
+
+    if not content_type:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No file uploaded",
+        )
 
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -120,14 +127,19 @@ async def _handle_multipart_payload(request: Request) -> IngestionResponse:
 
         try:
             if source_type == SourceType.IMAGE:
-                content, metadata = extract_text_and_metadata(temp_path)
+                try:
+                    content, metadata = extract_text_and_metadata(temp_path)
+                except OCRProcessingError as exc:
+                    logger.warning("Image OCR failed; creating fallback image report", exc_info=exc)
+                    content = _build_image_fallback_content(upload)
+                    metadata = {
+                        "ocr_status": "failed",
+                        "ocr_error": str(exc),
+                        "filename": upload.filename or "uploaded image",
+                        "content_type": upload.content_type or "unknown",
+                    }
             else:
                 content, metadata = transcribe_audio(temp_path)
-        except OCRProcessingError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(exc),
-            ) from exc
         except SpeechTranscriptionError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -176,6 +188,15 @@ def _detect_source_type(upload: UploadFile) -> SourceType | None:
         return SourceType.AUDIO
 
     return None
+
+
+def _build_image_fallback_content(upload: UploadFile) -> str:
+    filename = Path(upload.filename or "uploaded image").name
+    return (
+        "Image report uploaded for review. "
+        f"Source file: {filename}. "
+        "OCR could not extract readable text, so the issue details should be reviewed manually."
+    )
 
 
 def _write_temp_file(file_bytes: bytes, suffix: str) -> Path:

@@ -15,8 +15,8 @@ apiClient.interceptors.request.use((config) => {
 
   config.headers = config.headers ?? {};
 
-  config.headers['X-Actor-Id'] = actorId || DEFAULT_ADMIN_ID;
-  config.headers['X-Actor-Role'] = actorRole;
+  config.headers['X-Actor-Id'] = config.headers['X-Actor-Id'] ?? (actorId || DEFAULT_ADMIN_ID);
+  config.headers['X-Actor-Role'] = config.headers['X-Actor-Role'] ?? actorRole;
 
   return config;
 });
@@ -32,10 +32,13 @@ apiClient.interceptors.response.use(
             ? detail
             : detail
               ? JSON.stringify(detail)
-              : error.message || 'Request failed';
+            : error.message || 'Request failed';
         toast.error(message);
       } else {
-        toast.error('Unable to reach the backend. Check that the FastAPI server is running.');
+        const method = error.config?.method?.toLowerCase();
+        if (method !== 'get') {
+          toast.error('Unable to reach the backend. Check that the FastAPI server is running.');
+        }
       }
     } else {
       toast.error('An unexpected error occurred.');

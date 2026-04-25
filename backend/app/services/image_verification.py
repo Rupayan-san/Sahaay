@@ -518,8 +518,12 @@ class ImageVerificationService:
             with Image.open(resolved_path) as image:
                 exif_data = self._extract_exif_data(image)
                 rgb_image = image.convert("RGB")
-        except (FileNotFoundError, UnidentifiedImageError, OSError) as exc:
-            raise ImageVerificationError("Cannot process image") from exc
+        except FileNotFoundError as exc:
+            raise ImageVerificationError(f"Image file not found: {image_path}. Please resubmit the assignment images.") from exc
+        except UnidentifiedImageError as exc:
+            raise ImageVerificationError(f"Uploaded file is not a readable image: {image_path}") from exc
+        except OSError as exc:
+            raise ImageVerificationError(f"Cannot process image: {image_path}") from exc
 
         return LoadedImage(
             image_path=image_path,
@@ -551,7 +555,7 @@ class ImageVerificationService:
             if candidate.exists() and candidate.is_file():
                 return candidate.resolve()
 
-        raise ImageVerificationError("Cannot process image")
+        raise ImageVerificationError(f"Image file not found: {image_path}. Please resubmit the assignment images.")
 
     def _extract_exif_data(self, image: Image.Image) -> dict[str, Any]:
         exif_payload: dict[str, Any] = {}

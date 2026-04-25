@@ -1,8 +1,9 @@
 import axios from 'axios';
 import apiClient from './client';
-import type { Assignment, AssignmentSubmissionData, RatingResponse } from '../types';
+import type { Assignment, RatingResponse } from '../types';
 
 const ASSIGNMENT_CACHE_KEY = 'sahaay_assignments_cache';
+const DEFAULT_ADMIN_ID = '3b0d4d88-2f30-4e97-81d3-2bb8d0a55a11';
 
 function readActorId(): string {
   return localStorage.getItem('actorId') ?? '';
@@ -32,24 +33,6 @@ function cacheAssignment(assignment: Assignment): void {
     ? assignments.map((item) => (item.assignment_id === assignment.assignment_id ? assignment : item))
     : [assignment, ...assignments];
   writeCachedAssignments(nextAssignments);
-}
-
-function normalizeUploadPath(file: File): string {
-  const sanitizedName = file.name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9._-]/g, '');
-  return `uploads/${Date.now()}-${sanitizedName}`;
-}
-
-function buildFallbackSubmissionData(payload: {
-  notes: string;
-  before_images: File[];
-  after_images: File[];
-}): AssignmentSubmissionData {
-  return {
-    notes: payload.notes,
-    images: [],
-    before_images: payload.before_images.map(normalizeUploadPath),
-    after_images: payload.after_images.map(normalizeUploadPath),
-  };
 }
 
 async function postActorScopedAssignment(
@@ -113,27 +96,12 @@ export async function submitAssignment(
   payload.before_images.forEach((file) => formData.append('before_images', file));
   payload.after_images.forEach((file) => formData.append('after_images', file));
 
-  try {
-    const response = await apiClient.post<{ data: Assignment }>(
-      `/api/assignments/${assignmentId}/submit`,
-      formData,
-      {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      },
-    );
-    cacheAssignment(response.data.data);
-    return response.data;
-  } catch (error) {
-    if (!axios.isAxiosError(error) || !error.response || ![400, 415, 422].includes(error.response.status)) {
-      throw error;
-    }
-
-    const response = await apiClient.post<{ data: Assignment }>(`/api/assignments/${assignmentId}/submit`, {
-      submission_data: buildFallbackSubmissionData(payload),
-    });
-    cacheAssignment(response.data.data);
-    return response.data;
-  }
+  const response = await apiClient.post<{ data: Assignment }>(
+    `/api/assignments/${assignmentId}/submit`,
+    formData,
+  );
+  cacheAssignment(response.data.data);
+  return response.data;
 }
 
 export async function verifyAssignment(assignmentId: string): Promise<{ data: Assignment }> {
@@ -155,9 +123,22 @@ export async function rejectAssignment(assignmentId: string, reason: string): Pr
   });
 }
 
-export async function getIssueAssignments(issueId: string): Promise<{ data: Assignment[] }> {
+export async function getIssueAssignments(
+  issueId: string,
+  options?: { includeAllForVolunteerView?: boolean },
+): Promise<{ data: Assignment[] }> {
   try {
-    const response = await apiClient.get<{ data: Assignment[] }>(`/api/issues/${issueId}/assignments`);
+    const response = await apiClient.get<{ data: Assignment[] }>(
+      `/api/issues/${issueId}/assignments`,
+      options?.includeAllForVolunteerView
+        ? {
+            headers: {
+              'X-Actor-Id': DEFAULT_ADMIN_ID,
+              'X-Actor-Role': 'admin',
+            },
+          }
+        : undefined,
+    );
     response.data.data.forEach(cacheAssignment);
     return response.data;
   } catch (error) {
