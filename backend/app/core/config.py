@@ -26,7 +26,7 @@ def get_settings() -> Settings:
         gemini_api_key=os.getenv("GEMINI_API_KEY"),
         gemini_model_name=os.getenv("GEMINI_MODEL_NAME", "gemini-2.0-flash-exp"),
         mongodb_uri=os.getenv("MONGODB_URI", "mongodb://localhost:27017"),
-        mongodb_db_name=os.getenv("MONGODB_DB_NAME", "community_coordination"),
+        mongodb_db_name=os.getenv("MONGODB_DB_NAME", "sahaay_db"),
         issue_similarity_threshold=float(os.getenv("ISSUE_SIMILARITY_THRESHOLD", "0.85")),
         gmail_user=os.getenv("GMAIL_USER"),
         gmail_app_password=os.getenv("GMAIL_APP_PASSWORD"),

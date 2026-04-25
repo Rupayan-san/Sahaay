@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes.assignments import initialize_assignment_indexes, router as assignments_router
 from app.api.routes.leaderboard import router as leaderboard_router
@@ -40,6 +43,17 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Community Coordination Platform API", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+
 app.include_router(ingestion_router)
 app.include_router(issues_router)
 app.include_router(volunteers_router)
@@ -48,6 +62,17 @@ app.include_router(verification_router)
 app.include_router(ratings_router)
 app.include_router(leaderboard_router)
 app.include_router(reports_router)
+
+
+@app.get("/health", tags=["health"])
+async def health_check() -> dict:
+    from app.core.database import get_database
+    try:
+        get_database()
+        db_status = "connected"
+    except RuntimeError:
+        db_status = "disconnected"
+    return {"status": "ok", "database": db_status}
 
 
 @app.exception_handler(RequestValidationError)

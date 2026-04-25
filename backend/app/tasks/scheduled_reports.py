@@ -54,10 +54,13 @@ async def _run_weekly_impact_report_job() -> None:
         report = await get_report_generator_service().generate_weekly_impact_report(days=7)
         html_body = get_report_generator_service().render_markdown_as_html(report.report_markdown)
         subject = f"Weekly Impact Report - {report.date_range}"
-        await get_notification_service().notify_admin(
-            subject=subject,
-            body=report.report_markdown,
-            html_body=html_body,
-        )
+        try:
+            await get_notification_service().notify_admin(
+                subject=subject,
+                body=report.report_markdown,
+                html_body=html_body,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Weekly report email skipped — Gmail not configured: %s", exc)
     except Exception:  # noqa: BLE001
         logger.exception("Weekly impact report job failed")

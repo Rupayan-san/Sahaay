@@ -1,5 +1,7 @@
 import axios from 'axios';
 import toast from 'react-hot-toast';
+// Force store initialization before first render
+import '../store/useAppStore';
 
 const apiClient = axios.create({
   baseURL: 'http://localhost:8000',
@@ -9,12 +11,11 @@ const apiClient = axios.create({
 apiClient.interceptors.request.use((config) => {
   const actorId = localStorage.getItem('actorId') ?? '';
   const actorRole = localStorage.getItem('actorRole') ?? 'admin';
+  const DEFAULT_ADMIN_ID = '3b0d4d88-2f30-4e97-81d3-2bb8d0a55a11';
 
   config.headers = config.headers ?? {};
 
-  if (actorId) {
-    config.headers['X-Actor-Id'] = actorId;
-  }
+  config.headers['X-Actor-Id'] = actorId || DEFAULT_ADMIN_ID;
   config.headers['X-Actor-Role'] = actorRole;
 
   return config;
