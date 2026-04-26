@@ -51,7 +51,7 @@ class IssueCreateRequest(BaseModel):
 
 
 class ExtractedIssue(BaseModel):
-    model_config = ConfigDict(use_enum_values=True)
+    model_config = ConfigDict()
 
     title: str = Field(..., min_length=5, max_length=120)
     category: IssueCategory

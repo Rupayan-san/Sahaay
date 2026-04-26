@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle2,
@@ -40,7 +40,15 @@ interface AssignmentLocationState {
   issue?: Issue;
 }
 
-type AssignmentTab = 'all' | 'applied' | 'assigned' | 'in_progress' | 'submitted' | 'completed';
+type AssignmentTab =
+  | 'all'
+  | 'applied'
+  | 'assigned'
+  | 'in_progress'
+  | 'submitted'
+  | 'verified'
+  | 'completed'
+  | 'rejected';
 
 const assignmentTabs: { label: string; value: AssignmentTab }[] = [
   { label: 'All', value: 'all' },
@@ -48,14 +56,26 @@ const assignmentTabs: { label: string; value: AssignmentTab }[] = [
   { label: 'Assigned', value: 'assigned' },
   { label: 'In Progress', value: 'in_progress' },
   { label: 'Submitted', value: 'submitted' },
+  { label: 'Verified', value: 'verified' },
   { label: 'Completed', value: 'completed' },
+  { label: 'Rejected', value: 'rejected' },
 ];
+
+const API_BASE_URL = 'http://localhost:8000';
 
 function formatDate(value?: string | null): string {
   if (!value) {
     return 'Not set';
   }
   return new Date(value).toLocaleString();
+}
+
+function buildImageUrl(path: string): string {
+  const normalized = path.trim().replace(/\\/g, '/');
+  if (normalized.startsWith('http://') || normalized.startsWith('https://')) {
+    return normalized;
+  }
+  return `${API_BASE_URL}/${normalized.replace(/^\/+/, '')}`;
 }
 
 function statusTone(status: 'pass' | 'fail' | 'suspicious' | 'pass_fail'): string {
@@ -76,6 +96,54 @@ function renderLayerLabel(result: VerificationLayerResult): string {
     return 'Fail';
   }
   return 'Not checked';
+}
+
+function SubmissionImageGrid({
+  title,
+  imagePaths,
+}: {
+  title: string;
+  imagePaths: string[];
+}) {
+  if (imagePaths.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="label-caps text-on-surface-variant dark:text-gray-500">{title}</p>
+        <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-on-surface dark:bg-gray-900 dark:text-gray-200">
+          {imagePaths.length} image{imagePaths.length === 1 ? '' : 's'}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        {imagePaths.map((imagePath) => {
+          const imageUrl = buildImageUrl(imagePath);
+          return (
+            <a
+              key={imagePath}
+              href={imageUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="group overflow-hidden rounded-[20px] border border-outline-variant bg-white dark:border-gray-800 dark:bg-gray-900"
+              title={imagePath}
+            >
+              <img
+                src={imageUrl}
+                alt={`${title} evidence`}
+                className="aspect-square w-full object-cover transition group-hover:scale-105"
+                loading="lazy"
+              />
+              <div className="truncate px-3 py-2 text-xs font-medium text-on-surface-variant dark:text-gray-400">
+                {imagePath.split('/').pop() ?? imagePath}
+              </div>
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function AssignmentSkeleton() {
@@ -184,7 +252,7 @@ export function AssignmentView() {
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { actorId, actorRole } = useAppStore();
+  const { actorId, actorRole, setActor } = useAppStore();
   const state = (location.state ?? {}) as AssignmentLocationState;
   const [activeTab, setActiveTab] = useState<AssignmentTab>('all');
   const [submitTarget, setSubmitTarget] = useState<Assignment | null>(null);
@@ -218,8 +286,11 @@ export function AssignmentView() {
 
   const assignmentQueries = useQueries({
     queries: issueIds.map((issueId) => ({
-      queryKey: ['issue-assignments', issueId],
-      queryFn: async () => getIssueAssignments(issueId),
+      queryKey: ['issue-assignments', issueId, actorRole],
+      queryFn: async () =>
+        getIssueAssignments(issueId, {
+          includeAllForVolunteerView: actorRole === 'volunteer',
+        }),
       enabled: Boolean(issueId),
     })),
   });
@@ -252,6 +323,19 @@ export function AssignmentView() {
       queryClient.invalidateQueries({ queryKey: ['issue-assignments'] });
       queryClient.invalidateQueries({ queryKey: ['issues'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+    },
+  });
+
+  const completeMutation = useMutation({
+    mutationFn: (assignment: Assignment) => completeAssignment(assignment.assignment_id),
+    onSuccess: (_response, assignment) => {
+      toast.success('Assignment completed.');
+      setRatingTarget(assignment);
+      setRatingForm({ stars: 5, review: '' });
+      queryClient.invalidateQueries({ queryKey: ['issue-assignments'] });
+      queryClient.invalidateQueries({ queryKey: ['issues'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['leaderboard'] });
     },
   });
 
@@ -288,22 +372,12 @@ export function AssignmentView() {
         toast.success('Assignment verified.');
         queryClient.invalidateQueries({ queryKey: ['issue-assignments'] });
         queryClient.invalidateQueries({ queryKey: ['issues'] });
+        // If verification passed and the backend advanced the status to "verified",
+        // streamline the flow by completing immediately.
+        completeMutation.mutate(updatedAssignment);
       } else {
         toast.error('Verification flagged the submission for manual review.');
       }
-    },
-  });
-
-  const completeMutation = useMutation({
-    mutationFn: (assignment: Assignment) => completeAssignment(assignment.assignment_id),
-    onSuccess: (_response, assignment) => {
-      toast.success('Assignment completed.');
-      setRatingTarget(assignment);
-      setRatingForm({ stars: 5, review: '' });
-      queryClient.invalidateQueries({ queryKey: ['issue-assignments'] });
-      queryClient.invalidateQueries({ queryKey: ['issues'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
-      queryClient.invalidateQueries({ queryKey: ['leaderboard'] });
     },
   });
 
@@ -354,24 +428,70 @@ export function AssignmentView() {
     [volunteers],
   );
 
-  const assignments = useMemo(() => {
+  const allAssignments = useMemo(() => {
     const flattened = assignmentQueries.flatMap((query) => query.data?.data ?? []);
     const deduped = new Map(flattened.map((assignment) => [assignment.assignment_id, assignment]));
     return Array.from(deduped.values())
-      .filter((assignment) =>
-        actorRole === 'admin' ? true : assignment.volunteer_id === actorId,
-      )
-      .filter((assignment) => (activeTab === 'all' ? true : assignment.status === activeTab))
       .sort(
         (left, right) =>
           new Date(right.applied_at).getTime() - new Date(left.applied_at).getTime(),
       );
-  }, [activeTab, actorId, actorRole, assignmentQueries]);
+  }, [assignmentQueries]);
+
+  const assignments = useMemo(
+    () => allAssignments.filter((assignment) => (activeTab === 'all' ? true : assignment.status === activeTab)),
+    [activeTab, allAssignments],
+  );
 
   const loadingAssignments =
     issuesQuery.isPending ||
     volunteersQuery.isPending ||
     assignmentQueries.some((query) => query.isPending);
+
+  useEffect(() => {
+    if (actorRole !== 'volunteer' || loadingAssignments || allAssignments.length === 0) {
+      return;
+    }
+
+    const actionable = allAssignments.find(
+      (assignment) => assignment.status === 'in_progress' || assignment.status === 'assigned',
+    );
+
+    const actorHasActionable = allAssignments.some(
+      (assignment) =>
+        assignment.volunteer_id === actorId &&
+        (assignment.status === 'in_progress' || assignment.status === 'assigned'),
+    );
+
+    // If the currently active volunteer doesn't have any actionable assignments, but someone does,
+    // switch to the volunteer that can actually take action.
+    if (!actorHasActionable && actionable) {
+      setActor('volunteer', actionable.volunteer_id);
+      return;
+    }
+
+    const actorHasAssignments = allAssignments.some((assignment) => assignment.volunteer_id === actorId);
+    if (!actorHasAssignments) {
+      // Fall back to the most recent assignment's volunteer id.
+      setActor('volunteer', allAssignments[0].volunteer_id);
+      return;
+    }
+
+    // Default volunteers into an actionable tab.
+    if (activeTab === 'all') {
+      const hasAssigned = allAssignments.some(
+        (assignment) => assignment.volunteer_id === actorId && assignment.status === 'assigned',
+      );
+      const hasInProgress = allAssignments.some(
+        (assignment) => assignment.volunteer_id === actorId && assignment.status === 'in_progress',
+      );
+      if (hasInProgress) {
+        setActiveTab('in_progress');
+      } else if (hasAssigned) {
+        setActiveTab('assigned');
+      }
+    }
+  }, [actorId, actorRole, activeTab, allAssignments, loadingAssignments, setActor]);
 
   const handleSubmitAction = () => {
     if (!submitTarget) {
@@ -431,7 +551,7 @@ export function AssignmentView() {
       ) : null}
 
       <div className="rounded-[28px] border border-outline-variant bg-surface-container-low p-2 dark:border-gray-800 dark:bg-gray-900/70">
-        <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-6">
+        <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-8">
           {assignmentTabs.map((tab) => (
             <button
               key={tab.value}
@@ -457,7 +577,7 @@ export function AssignmentView() {
           message={
             actorRole === 'admin'
               ? 'Assignments will appear here as volunteers apply to issues.'
-              : 'Once you are assigned to work, your task history will show up here.'
+              : 'Once you are assigned to work, your task history will show up here. If you do not see Start/Submit, check the active actor id in the top bar.'
           }
         />
       ) : null}
@@ -551,6 +671,16 @@ export function AssignmentView() {
                             {assignment.submission_data.after_images.length} after images
                           </span>
                         </div>
+                        <div className="mt-5 space-y-5">
+                          <SubmissionImageGrid
+                            title="Before images"
+                            imagePaths={assignment.submission_data.before_images}
+                          />
+                          <SubmissionImageGrid
+                            title="After images"
+                            imagePaths={assignment.submission_data.after_images}
+                          />
+                        </div>
                       </div>
                     ) : null}
 
@@ -591,6 +721,30 @@ export function AssignmentView() {
                   <aside className="w-full shrink-0 rounded-[24px] bg-surface-container p-4 dark:bg-gray-950/70 lg:w-64">
                     <p className="label-caps text-on-surface-variant dark:text-gray-500">Actions</p>
                     <div className="mt-4 space-y-3">
+                      {actorRole === 'volunteer' ? (
+                        <div className="rounded-[20px] bg-white p-3 text-xs text-on-surface-variant dark:bg-gray-900 dark:text-gray-400">
+                          <p>
+                            Active actor: <span className="font-semibold">{actorId.slice(0, 8)}</span>
+                          </p>
+                          <p>
+                            Assigned to: <span className="font-semibold">{assignment.volunteer_id.slice(0, 8)}</span>
+                          </p>
+                          <p>
+                            Status: <span className="font-semibold capitalize">{assignment.status}</span>
+                          </p>
+                        </div>
+                      ) : null}
+
+                      {actorRole === 'volunteer' && assignment.volunteer_id !== actorId ? (
+                        <button
+                          type="button"
+                          className="btn-outline inline-flex w-full items-center justify-center gap-2 py-3"
+                          onClick={() => setActor('volunteer', assignment.volunteer_id)}
+                        >
+                          Switch to this volunteer
+                        </button>
+                      ) : null}
+
                       {actorRole === 'admin' && assignment.status === 'applied' ? (
                         <button
                           type="button"
@@ -603,7 +757,9 @@ export function AssignmentView() {
                         </button>
                       ) : null}
 
-                      {actorRole === 'volunteer' && assignment.status === 'assigned' ? (
+                      {actorRole === 'volunteer' &&
+                      assignment.volunteer_id === actorId &&
+                      assignment.status === 'assigned' ? (
                         <button
                           type="button"
                           className="btn-primary inline-flex w-full items-center justify-center gap-2 py-3"
@@ -615,7 +771,9 @@ export function AssignmentView() {
                         </button>
                       ) : null}
 
-                      {actorRole === 'volunteer' && assignment.status === 'in_progress' ? (
+                      {actorRole === 'volunteer' &&
+                      assignment.volunteer_id === actorId &&
+                      assignment.status === 'in_progress' ? (
                         <button
                           type="button"
                           className="btn-primary inline-flex w-full items-center justify-center gap-2 py-3"
@@ -626,15 +784,34 @@ export function AssignmentView() {
                         </button>
                       ) : null}
 
+                      {actorRole === 'volunteer' &&
+                      assignment.volunteer_id === actorId &&
+                      assignment.status !== 'assigned' &&
+                      assignment.status !== 'in_progress' ? (
+                        <div className="rounded-[20px] bg-surface-container-low p-3 text-sm text-on-surface-variant dark:bg-gray-950/60 dark:text-gray-400">
+                          {assignment.status === 'applied'
+                            ? 'Waiting for an admin to assign you.'
+                            : assignment.status === 'submitted'
+                              ? 'Submitted — waiting for admin verification.'
+                              : assignment.status === 'verified'
+                                ? 'Verified — waiting for admin completion.'
+                                : assignment.status === 'completed'
+                                  ? 'Completed.'
+                                  : assignment.status === 'rejected'
+                                    ? 'Rejected — check admin notes.'
+                                    : 'No actions available for this status.'}
+                        </div>
+                      ) : null}
+
                       {actorRole === 'admin' && assignment.status === 'submitted' ? (
                         <button
                           type="button"
                           className="btn-primary inline-flex w-full items-center justify-center gap-2 py-3"
                           onClick={() => verifyMutation.mutate(assignment)}
-                          disabled={verifyMutation.isPending}
+                          disabled={verifyMutation.isPending || completeMutation.isPending}
                         >
                           <Eye size={16} />
-                          Verify
+                          {verifyMutation.isPending || completeMutation.isPending ? 'Verifying...' : 'Verify & complete'}
                         </button>
                       ) : null}
 

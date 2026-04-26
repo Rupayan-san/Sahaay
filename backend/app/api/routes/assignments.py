@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
-from pathlib import PurePath
+from pathlib import Path, PurePath
 from typing import Any
 
 from bson import ObjectId
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pymongo import ASCENDING, ReturnDocument
 from pymongo.errors import DuplicateKeyError
+from pydantic import ValidationError
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.core.auth import AuthenticatedActor, get_current_actor
 from app.core.database import get_assignment_collection, get_issue_collection, get_volunteer_collection
@@ -18,9 +21,9 @@ from app.models.assignment import (
     AssignmentApplyRequest,
     AssignmentRecord,
     AssignmentRejectRequest,
+    AssignmentListResponse,
     AssignmentResponse,
     AssignmentStatus,
-    AssignmentSubmitRequest,
     SubmissionData,
 )
 from app.models.issue import IssueStatus
@@ -40,6 +43,25 @@ ACTIVE_ASSIGNMENT_STATUSES = {
     AssignmentStatus.VERIFIED.value,
 }
 UPLOAD_DIRECTORY_NAME = "uploads"
+UPLOAD_DIRECTORY = Path(__file__).resolve().parents[3] / UPLOAD_DIRECTORY_NAME
+
+
+@router.get(
+    "/issues/{issue_id}/assignments",
+    response_model=AssignmentListResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def list_issue_assignments(
+    issue_id: str,
+    actor: AuthenticatedActor = Depends(get_current_actor),
+) -> AssignmentListResponse:
+    query: dict[str, Any] = {"issue_id": issue_id}
+    if actor.role.value == "volunteer":
+        query["volunteer_id"] = actor.actor_id
+
+    assignments = await get_assignment_collection().find(query).sort("applied_at", -1).to_list(length=250)
+    records = [AssignmentRecord.from_mongo(document) for document in assignments]
+    return AssignmentListResponse(data=records)
 
 
 async def initialize_assignment_indexes() -> None:
@@ -235,7 +257,7 @@ async def start_assignment(
 @router.post("/assignments/{assignment_id}/submit", response_model=AssignmentResponse, status_code=status.HTTP_200_OK)
 async def submit_assignment(
     assignment_id: str,
-    payload: AssignmentSubmitRequest,
+    request: Request,
     background_tasks: BackgroundTasks,
     actor: AuthenticatedActor = Depends(get_current_actor),
 ) -> AssignmentResponse:
@@ -246,7 +268,9 @@ async def submit_assignment(
 
     _ensure_assignment_belongs_to_actor(assignment_document, actor)
     _ensure_transition_allowed(assignment_document["status"], AssignmentStatus.SUBMITTED)
-    _validate_submission_images(payload.submission_data)
+
+    submission_data = await _read_submission_data(request)
+    _validate_submission_images(submission_data)
 
     current_time = datetime.now(timezone.utc)
     updated_document = await get_assignment_collection().find_one_and_update(
@@ -254,7 +278,7 @@ async def submit_assignment(
         {
             "$set": {
                 "status": AssignmentStatus.SUBMITTED.value,
-                "submission_data": payload.submission_data.model_dump(),
+                "submission_data": submission_data.model_dump(),
                 "submitted_at": current_time,
                 "updated_at": current_time,
             }
@@ -280,6 +304,53 @@ async def submit_assignment(
         )
 
     return AssignmentResponse(data=AssignmentRecord.from_mongo(updated_document))
+
+
+async def _read_submission_data(request: Request) -> SubmissionData:
+    content_type = request.headers.get("content-type", "").lower()
+    if content_type.startswith("multipart/form-data"):
+        return await _read_multipart_submission_data(request)
+
+    try:
+        payload = await request.json()
+        submission_data = SubmissionData.model_validate(payload.get("submission_data") if isinstance(payload, dict) else None)
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="submission_data") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid submission payload") from exc
+    return submission_data
+
+
+async def _read_multipart_submission_data(request: Request) -> SubmissionData:
+    form_data = await request.form()
+    notes = str(form_data.get("notes") or "")
+    before_images = await _save_submission_uploads(form_data.getlist("before_images"), "before")
+    after_images = await _save_submission_uploads(form_data.getlist("after_images"), "after")
+    return SubmissionData(notes=notes, before_images=before_images, after_images=after_images)
+
+
+async def _save_submission_uploads(values: list[Any], prefix: str) -> list[str]:
+    image_paths: list[str] = []
+    for value in values:
+        if not isinstance(value, StarletteUploadFile):
+            continue
+        if not (value.content_type or "").lower().startswith("image/"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only image uploads are allowed")
+
+        original_name = Path(value.filename or f"{prefix}.jpg").name
+        safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "-", original_name).strip(".-") or f"{prefix}.jpg"
+        stored_name = f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}-{uuid.uuid4().hex[:8]}-{safe_name}"
+        relative_path = f"{UPLOAD_DIRECTORY_NAME}/{stored_name}"
+        destination = UPLOAD_DIRECTORY / stored_name
+
+        UPLOAD_DIRECTORY.mkdir(parents=True, exist_ok=True)
+        file_bytes = await value.read()
+        if not file_bytes:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded image is empty")
+        destination.write_bytes(file_bytes)
+        image_paths.append(relative_path)
+
+    return image_paths
 
 
 @router.post("/assignments/{assignment_id}/verify", response_model=AssignmentResponse, status_code=status.HTTP_200_OK)

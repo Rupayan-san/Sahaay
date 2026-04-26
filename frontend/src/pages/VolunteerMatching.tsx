@@ -348,7 +348,7 @@ export function VolunteerMatching() {
                     onAssign={(issueId, volunteerId) =>
                       assignMutation.mutate({ issueId, volunteerId })
                     }
-                    assigningVolunteerId={assignMutation.variables?.volunteerId}
+                    assigningVolunteerId={assignMutation.isPending ? assignMutation.variables?.volunteerId : undefined}
                   />
                 ))}
               </div>

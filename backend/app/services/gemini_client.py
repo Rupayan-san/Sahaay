@@ -26,13 +26,13 @@ Extract the following from this report:
 Input text: {raw_text}
 
 Return ONLY valid JSON:
-{
+{{
   "title": "...",
   "category": "...",
   "location": "...",
   "severity": "...",
   "description": "..."
-}
+}}
 """
 
 SIMPLIFIED_RETRY_PROMPT_TEXT = """Extract issue data from the report below and return JSON only.
@@ -43,13 +43,13 @@ Allowed severities: critical, high, medium, low
 Report: {raw_text}
 
 Return JSON with exactly these keys:
-{
+{{
   "title": "...",
   "category": "...",
   "location": "...",
   "severity": "...",
   "description": "..."
-}
+}}
 """
 
 EXTRACTION_PROMPT = PromptTemplate.from_template(EXTRACTION_PROMPT_TEXT)

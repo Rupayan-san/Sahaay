@@ -155,3 +155,8 @@ class AssignmentRecord(BaseModel):
 class AssignmentResponse(BaseModel):
     success: bool = True
     data: AssignmentRecord
+
+
+class AssignmentListResponse(BaseModel):
+    success: bool = True
+    data: list[AssignmentRecord]

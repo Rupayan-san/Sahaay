@@ -24,7 +24,7 @@ export interface AppStore {
 
 function readStoredRole(): ActorRole {
   const storedRole = localStorage.getItem(STORAGE_KEYS.actorRole);
-  return storedRole === 'volunteer' ? 'volunteer' : 'admin';
+  return storedRole === 'admin' ? 'admin' : 'volunteer';
 }
 
 function readStoredActorId(role: ActorRole): string {
