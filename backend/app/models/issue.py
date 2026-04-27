@@ -49,7 +49,6 @@ class IssueCreateRequest(BaseModel):
             raise ValueError("raw_text must be at least 5 characters long")
         return normalized
 
-
 class ExtractedIssue(BaseModel):
     model_config = ConfigDict()
 
